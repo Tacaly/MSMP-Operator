@@ -1,20 +1,23 @@
 <?php
 include 'templates/header.php';
 check_login();
+// $proxy and $current_server_id are now available from header.php
 
-require_once 'lib/msmp_proxy.php';
-$proxy = new MSMP_Proxy(MSMP_PROXY_URL);
-$data = $proxy->getBans();
+echo "<h1>Ban List (" . htmlspecialchars($current_server_name) . ")</h1>";
+
+if (!$current_server_id) {
+    echo '<p class="error">No server selected or available.</p>';
+} else {
+    $data = $proxy->getBans($current_server_id);
+    
+    if (isset($data['error'])) {
+        echo '<div class="error"><strong>Error:</strong> ' . htmlspecialchars($data['error']);
+        if (isset($data['tip'])) echo "<br><em>" . htmlspecialchars($data['tip']) . "</em>";
+        echo '</div>';
+    } else {
+        // ... (The rest of your table HTML from before) ...
+        // ... (No changes needed to the table itself) ...
 ?>
-
-<h1>Ban List</h1>
-
-<?php if (isset($data['error'])): ?>
-    <div class="error">
-        <strong>Error:</strong> <?php echo htmlspecialchars($data['error']); ?>
-        <?php if (isset($data['tip'])) echo "<br><em>" . htmlspecialchars($data['tip']) . "</em>"; ?>
-    </div>
-<?php else: ?>
     <table>
         <thead>
             <tr>
@@ -38,6 +41,8 @@ $data = $proxy->getBans();
             <?php endif; ?>
         </tbody>
     </table>
-<?php endif; ?>
-
-<?php include 'templates/footer.php'; ?>
+<?php 
+    }
+}
+include 'templates/footer.php'; 
+?>

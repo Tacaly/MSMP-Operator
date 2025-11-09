@@ -1,17 +1,17 @@
 <?php
-// This class makes it easy for PHP to get data from our Node.js proxy
 class MSMP_Proxy {
     private $base_url;
 
+    // The base URL is now just the proxy URL, not a specific server
     public function __construct($url) {
         $this->base_url = $url;
     }
 
     private function make_request($endpoint) {
-        $url = $this->base_url . $endpoint;
+        $url = $this->base_url . $endpoint; // The endpoint now includes the server ID
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5); // 5 second timeout
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
         $response = curl_exec($ch);
         curl_close($ch);
         
@@ -27,15 +27,21 @@ class MSMP_Proxy {
         return $data;
     }
 
-    public function getPlayers() {
-        return $this->make_request('/players');
+    // NEW Method: Gets the list of available servers
+    public function getServers() {
+        return $this->make_request('/servers');
     }
 
-    public function getBans() {
-        return $this->make_request('/bans');
+    // UPDATED Methods: All methods now require a $serverId
+    public function getPlayers($serverId) {
+        return $this->make_request('/api/' . urlencode($serverId) . '/players');
     }
 
-    public function getOps() {
-        return $this->make_request('/ops');
+    public function getBans($serverId) {
+        return $this->make_request('/api/' . urlencode($serverId) . '/bans');
+    }
+
+    public function getOps($serverId) {
+        return $this->make_request('/api/' . urlencode($serverId) . '/ops');
     }
 }

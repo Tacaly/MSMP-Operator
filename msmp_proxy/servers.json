@@ -1,0 +1,20 @@
+[
+  {
+    "id": "survival",
+    "name": "My Survival Server",
+    "url": "ws://127.0.0.1:25585",
+    "secret": "YOUR_40_CHAR_SURVIVAL_SECRET_KEY"
+  },
+  {
+    "id": "creative",
+    "name": "Creative World",
+    "url": "ws://127.0.0.1:25586",
+    "secret": "ANOTHER_40_CHAR_CREATIVE_SECRET"
+  },
+  {
+    "id": "skyblock",
+    "name": "Skyblock Hub",
+    "url": "ws://some-other-host.com:25585",
+    "secret": "A_DIFFERENT_SECRET_FOR_SKYBLOCK"
+  }
+]

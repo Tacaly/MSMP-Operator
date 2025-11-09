@@ -1,19 +1,21 @@
 <?php
 include 'templates/header.php';
 check_login();
+// $proxy, $current_server_id, and $current_server_name are from header.php
 
-require_once 'lib/msmp_proxy.php';
-$proxy = new MSMP_Proxy(MSMP_PROXY_URL);
-$data = $proxy->getOps();
+echo "<h1>Server Staff (" . htmlspecialchars($current_server_name) . ")</h1>";
+
+if (!$current_server_id) {
+    echo '<p class="error">No server selected or available.</p>';
+} else {
+    $data = $proxy->getOps($current_server_id);
+    
+    if (isset($data['error'])) {
+         echo '<div class="error"><strong>Error:</strong> ' . htmlspecialchars($data['error']) . '</div>';
+    } else {
+        // ... (The rest of your table HTML from before) ...
+        // ... (No changes needed to the table itself) ...
 ?>
-
-<h1>Server Staff (Operators)</h1>
-
-<?php if (isset($data['error'])): ?>
-    <div class="error">
-        <strong>Error:</strong> <?php echo htmlspecialchars($data['error']); ?>
-    </div>
-<?php else: ?>
     <table>
         <thead>
             <tr>
@@ -35,6 +37,8 @@ $data = $proxy->getOps();
             <?php endif; ?>
         </tbody>
     </table>
-<?php endif; ?>
-
-<?php include 'templates/footer.php'; ?>
+<?php
+    }
+}
+include 'templates/footer.php'; 
+?>

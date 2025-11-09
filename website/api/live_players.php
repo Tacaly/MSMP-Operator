@@ -1,16 +1,20 @@
 <?php
-// This is a dedicated API endpoint. It only outputs JSON.
 require_once '../config.php';
 require_once '../lib/msmp_proxy.php';
 
-// You might want to remove this check if you want the live
-// list to be public, but it's good for security.
-check_login();
-
+check_login(); // Security check
 header('Content-Type: application/json');
 
+// Get the current server from the session
+$serverId = $_SESSION['current_server_id'] ?? null;
+
+if (!$serverId) {
+    echo json_encode(['error' => 'No server selected in session.']);
+    exit();
+}
+
 $proxy = new MSMP_Proxy(MSMP_PROXY_URL);
-$data = $proxy->getPlayers();
+$data = $proxy->getPlayers($serverId);
 
 if (isset($data['error'])) {
     echo json_encode(['error' => $data['error']]);

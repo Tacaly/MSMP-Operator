@@ -1,131 +1,161 @@
 // proxy.js
-// This script connects to the MSMP WebSocket and provides a REST API for PHP.
+// Now supports managing multiple servers from a JSON file.
 
 const express = require('express');
 const WebSocket = require('ws');
+const fs = require('fs');
 
 // --- CONFIGURATION ---
-const MSMP_URL = 'ws://127.0.0.1:25585';
-const MSMP_SECRET = 'YOUR_40_CHAR_SUPER_SECRET_KEY'; // MUST match server.properties
+const SERVERS_CONFIG_FILE = 'servers.json';
 const PROXY_PORT = 8081; // The port your PHP website will talk to
 // ---------------------
 
 const app = express();
-let ws;
-let rpcId = 1;
+const servers = JSON.parse(fs.readFileSync(SERVERS_CONFIG_FILE, 'utf8'));
+
+// We now use Maps to store connections and callbacks, keyed by server ID
+const serverConnections = new Map();
 const rpcCallbacks = new Map();
 
-function connectToMSMP() {
-    console.log('Connecting to Minecraft Server Management Protocol...');
+function connectToMSMP(server) {
+    console.log(`[${server.id}] Connecting to ${server.name} (${server.url})...`);
     
-    // Set the authentication header
     const headers = {
-        'Authorization': `Bearer ${MSMP_SECRET}`
+        'Authorization': `Bearer ${server.secret}`
     };
 
-    ws = new WebSocket(MSMP_URL, { headers });
+    const ws = new WebSocket(server.url, { headers });
+    serverConnections.set(server.id, ws);
+    rpcCallbacks.set(server.id, new Map()); // Each server gets its own callback map
+
+    let rpcId = 1; // rpcId is now per-connection
 
     ws.on('open', () => {
-        console.log('Successfully connected to MSMP!');
-        
-        // Optional: Discover all available commands
-        // sendRpcRequest('rpc.discover').then(console.log).catch(console.error);
+        console.log(`[${server.id}] Successfully connected to MSMP!`);
     });
 
     ws.on('message', (data) => {
         const response = JSON.parse(data.toString());
+        const callbacks = rpcCallbacks.get(server.id);
         
-        // Check if this is a response to a request we sent
-        if (response.id && rpcCallbacks.has(response.id)) {
-            const callback = rpcCallbacks.get(response.id);
+        if (response.id && callbacks.has(response.id)) {
+            const callback = callbacks.get(response.id);
             if (response.error) {
                 callback.reject(response.error);
             } else {
                 callback.resolve(response.result);
             }
-            rpcCallbacks.delete(response.id);
+            callbacks.delete(response.id);
         } else if (response.method) {
-            // This is a server notification (e.g., player joined)
-            // console.log('Server Notification:', response);
+            // console.log(`[${server.id}] Server Notification:`, response);
         }
     });
 
     ws.on('close', () => {
-        console.log('Disconnected from MSMP. Reconnecting in 5 seconds...');
-        setTimeout(connectToMSMP, 5000);
+        console.log(`[${server.id}] Disconnected from MSMP. Reconnecting in 5 seconds...`);
+        serverConnections.delete(server.id);
+        setTimeout(() => connectToMSMP(server), 5000);
     });
 
     ws.on('error', (err) => {
-        console.error('MSMP WebSocket error:', err.message);
+        console.error(`[${server.id}] MSMP WebSocket error:`, err.message);
     });
-}
 
-// Function to send a JSON-RPC request and get a promise-based response
-function sendRpcRequest(method, params = {}) {
-    return new Promise((resolve, reject) => {
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-            return reject(new Error('MSMP WebSocket is not connected.'));
-        }
-
-        const id = rpcId++;
-        const payload = {
-            jsonrpc: '2.0',
-            id: id,
-            method: method,
-            params: params
-        };
-
-        // Register the callback for this request ID
-        rpcCallbacks.set(id, { resolve, reject });
-        
-        // Send the request
-        ws.send(JSON.stringify(payload));
-        
-        // Timeout if no response in 5s
-        setTimeout(() => {
-            if (rpcCallbacks.has(id)) {
-                rpcCallbacks.delete(id);
-                reject(new Error('RPC request timed out.'));
+    // We must redefine sendRpcRequest *inside* this scope to capture the
+    // correct ws, callbacks, and rpcId for this specific server.
+    server.sendRpcRequest = (method, params = {}) => {
+        return new Promise((resolve, reject) => {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                return reject(new Error('MSMP WebSocket is not connected.'));
             }
-        }, 5000);
-    });
+
+            const id = rpcId++;
+            const payload = {
+                jsonrpc: '2.0',
+                id: id,
+                method: method,
+                params: params
+            };
+
+            const callbacks = rpcCallbacks.get(server.id);
+            callbacks.set(id, { resolve, reject });
+            
+            ws.send(JSON.stringify(payload));
+            
+            setTimeout(() => {
+                if (callbacks.has(id)) {
+                    callbacks.delete(id);
+                    reject(new Error('RPC request timed out.'));
+                }
+            }, 5000);
+        });
+    };
 }
 
-// Start the WebSocket connection
-connectToMSMP();
+// Connect to all servers defined in the JSON
+servers.forEach(connectToMSMP);
+
 
 // --- Create the REST API for PHP ---
+// The API now expects a server ID in the URL, e.g., /api/survival/players
 
-app.get('/players', async (req, res) => {
+// Helper function to get the server object from a request
+function getServerFromRequest(req, res) {
+    const serverId = req.params.serverId;
+    const server = servers.find(s => s.id === serverId);
+    if (!server) {
+        res.status(404).json({ error: 'Server not found.' });
+        return null;
+    }
+    if (!server.sendRpcRequest) {
+        res.status(503).json({ error: 'Server is not connected.' });
+        return null;
+    }
+    return server;
+}
+
+// NEW ENDPOINT: /servers
+// Provides the list of servers to the PHP frontend.
+app.get('/servers', (req, res) => {
+    // Only send the public-safe data (id and name)
+    const serverList = servers.map(s => ({ id: s.id, name: s.name }));
+    res.json(serverList);
+});
+
+// UPDATED ENDPOINT: /api/:serverId/players
+app.get('/api/:serverId/players', async (req, res) => {
+    const server = getServerFromRequest(req, res);
+    if (!server) return;
+
     try {
-        // MSMP provides separate methods for connected and offline players
-        const connectedPlayers = await sendRpcRequest('minecraft:players/connected/list');
-        const offlinePlayers = await sendRpcRequest('minecraft:players/offline/list'); // Note: This gets *all* known players
-        
-        // You'll need to figure out playtime. MSMP might not provide this.
-        // For now, we combine them.
+        const connectedPlayers = await server.sendRpcRequest('minecraft:players/connected/list');
+        const offlinePlayers = await server.sendRpcRequest('minecraft:players/offline/list');
         res.json({ connected: connectedPlayers, offline: offlinePlayers });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
 });
 
-app.get('/bans', async (req, res) => {
+// UPDATED ENDPOINT: /api/:serverId/bans
+app.get('/api/:serverId/bans', async (req, res) => {
+    const server = getServerFromRequest(req, res);
+    if (!server) return;
+
     try {
-        // The method is likely 'minecraft:banned_players/list' or similar.
-        // You MUST use 'rpc.discover' to find the exact method name.
-        const bans = await sendRpcRequest('minecraft:banned_players/list');
+        const bans = await server.sendRpcRequest('minecraft:banned_players/list');
         res.json(bans);
     } catch (error) {
-        // This will likely fail until you find the right method name
-        res.status(500).json({ error: error.message, tip: "Method 'minecraft:banned_players/list' might be wrong. Use rpc.discover to find the correct one." });
+        res.status(500).json({ error: error.message, tip: "Check rpc.discover for 'minecraft:banned_players/list'" });
     }
 });
 
-app.get('/ops', async (req, res) => {
+// UPDATED ENDPOINT: /api/:serverId/ops
+app.get('/api/:serverId/ops', async (req, res) => {
+    const server = getServerFromRequest(req, res);
+    if (!server) return;
+    
     try {
-        // This method is confirmed in the docs
-        const ops = await sendRpcRequest('minecraft:operators/list');
+        const ops = await server.sendRpcRequest('minecraft:operators/list');
         res.json(ops);
     } catch (error) {
         res.status(500).json({ error: error.message });
