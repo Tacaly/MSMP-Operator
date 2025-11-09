@@ -11,6 +11,7 @@ const PROXY_PORT = 8081; // The port your PHP website will talk to
 // ---------------------
 
 const app = express();
+app.use(express.json());
 const servers = JSON.parse(fs.readFileSync(SERVERS_CONFIG_FILE, 'utf8'));
 
 // We now use Maps to store connections and callbacks, keyed by server ID
@@ -159,6 +160,84 @@ app.get('/api/:serverId/ops', async (req, res) => {
         res.json(ops);
     } catch (error) {
         res.status(500).json({ error: error.message });
+    }
+});
+
+// --- NEW 'WRITE' ACTION ENDPOINTS ---
+
+// POST /api/:serverId/say
+app.post('/api/:serverId/say', async (req, res) => {
+    const server = getServerFromRequest(req, res);
+    if (!server) return;
+    
+    const { message } = req.body;
+    if (!message) {
+        return res.status(400).json({ error: 'Missing "message" in request body.' });
+    }
+
+    try {
+        // MSMP method is likely 'minecraft:chat/send_system_message'
+        const result = await server.sendRpcRequest('minecraft:chat/send_system_message', { message: message });
+        res.json({ success: true, result: result });
+    } catch (error) {
+        res.status(500).json({ error: error.message, tip: "Method 'minecraft:chat/send_system_message' might be wrong. Use rpc.discover." });
+    }
+});
+
+// POST /api/:serverId/kick
+app.post('/api/:serverId/kick', async (req, res) => {
+    const server = getServerFromRequest(req, res);
+    if (!server) return;
+    
+    const { name } = req.body;
+    if (!name) {
+        return res.status(400).json({ error: 'Missing "name" in request body.' });
+    }
+
+    try {
+        // MSMP params often take a {name: "..."} or {uuid: "..."} object
+        const result = await server.sendRpcRequest('minecraft:players/kick', [{ name: name }]);
+        res.json({ success: true, result: result });
+    } catch (error) {
+        res.status(500).json({ error: error.message, tip: "Method 'minecraft:players/kick' might be wrong." });
+    }
+});
+
+// POST /api/:serverId/ban
+app.post('/api/:serverId/ban', async (req, res) => {
+    const server = getServerFromRequest(req, res);
+    if (!server) return;
+    
+    const { name, reason } = req.body;
+    if (!name) {
+        return res.status(400).json({ error: 'Missing "name" in request body.' });
+    }
+
+    try {
+        const banData = { name: name, reason: reason || 'Banned via web panel.' };
+        const result = await server.sendRpcRequest('minecraft:banned_players/add', [banData]);
+        res.json({ success: true, result: result });
+    } catch (error) {
+        res.status(500).json({ error: error.message, tip: "Method 'minecraft:banned_players/add' might be wrong." });
+    }
+});
+
+// POST /api/:serverId/pardon
+app.post('/api/:serverId/pardon', async (req, res) => {
+    const server = getServerFromRequest(req, res);
+    if (!server) return;
+
+    const { name } = req.body; // Pardoning by name is common
+    if (!name) {
+        return res.status(400).json({ error: 'Missing "name" in request body.' });
+    }
+
+    try {
+        // We're pardoning based on the player profile name
+        const result = await server.sendRpcRequest('minecraft:banned_players/remove', [{ name: name }]);
+        res.json({ success: true, result: result });
+    } catch (error) {
+        res.status(500).json({ error: error.message, tip: "Method 'minecraft:banned_players/remove' might be wrong." });
     }
 });
 
